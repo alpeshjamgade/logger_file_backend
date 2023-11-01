@@ -89,13 +89,19 @@ defmodule LoggerFileBackend do
       output = format_event(level, msg, ts, md, state)
 
       try do
-        IO.write(io_device, output)
+        if Application.get_env(:logger, :use_c_io_writer, false) do
+          log(:c, path, output)
+        else
+          log(:elixir, io_device, output)
+        end
+
+        # IO.write(io_device, output)
         {:ok, state}
       rescue
         ErlangError ->
           case open_log(path) do
             {:ok, io_device, inode} ->
-              IO.write(io_device, prune(output))
+              # IO.write(io_device, prune(output))
               {:ok, %{state | io_device: io_device, inode: inode}}
 
             _other ->
@@ -259,4 +265,15 @@ defmodule LoggerFileBackend do
 
   defp prune_binary(<<>>, acc),
     do: acc
+
+  def log(:elixir, io_device, output) do
+    IO.write(io_device, output)
+  end
+
+  #TODO: use NIFs
+  def log(:c, log_file_path, output) do
+    clog_binary = "#{:code.priv_dir(:logger_file_backend)}/clog.so"
+    Port.open({:spawn_executable, clog_binary}, [args: [log_file_path, "#{output}"]])
+    :ok
+  end
 end
